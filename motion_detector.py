@@ -9,6 +9,7 @@ import threading  # MODUL ZA RAD U POZADINSKIM NITIMA (Sprečava seckanje)
 # Pretpostavljeni uvozi tvojih servisa
 from blob_service import save_snapshot
 from events_service import send_event
+from push_notification import send_face_detection_notification
 
 
 # ==============================================================================
@@ -21,6 +22,15 @@ def send_event_async(event_type, data):
     Glavna petlja kamere ne čeka odgovor sa mreže, pa nema seckanja video strima.
     """
     thread = threading.Thread(target=send_event, args=(event_type, data), daemon=True)
+    thread.start()
+
+
+def send_face_notification_async(camera, timestamp):
+    thread = threading.Thread(
+        target=send_face_detection_notification,
+        args=(camera, timestamp),
+        daemon=True
+    )
     thread.start()
 
 
@@ -117,6 +127,7 @@ def detection(cap):
 
                     # KLJUČNA IZMENA: Pozivamo asinhronu funkciju sa pozadinskom niti!
                     send_event_async("face_detected", data)
+                    send_face_notification_async(data["kamera"], data["vreme"])
 
                     # Ako u budućnosti koristiš save_snapshot i on usporava,
                     # možeš i njega prebaciti u nit:
