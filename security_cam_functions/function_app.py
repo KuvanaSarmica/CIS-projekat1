@@ -15,8 +15,8 @@ VISION_ENDPOINT = os.getenv("AZURE_VISION_ENDPOINT")
 VISION_KEY = os.getenv("AZURE_VISION_KEY")
 
 
-def analyze_image_with_cv(image_url: str):
-    """S šalje URL slike Azure Computer Vision servisu na analizu."""
+def analyze_image_with_cv(image_data: bytes):
+    """Šalje bajtove slike Azure Computer Vision servisu na analizu."""
     if not VISION_ENDPOINT or not VISION_KEY:
         logging.error(
             "❌ Fale VISION_ENDPOINT ili VISION_KEY u konfiguraciji!"
@@ -29,11 +29,10 @@ def analyze_image_with_cv(image_url: str):
     )
 
     try:
-        # Poziv Computer Vision servisa
-        result = client.analyze_from_url(
-            image_url=image_url,
+        # Poziv Computer Vision servisa (koristimo analyze umesto analyze_from_url za bajtove)
+        result = client.analyze(
+            image_data=image_data,
             visual_features=[
-                VisualFeatures.CAPTION,
                 VisualFeatures.TAGS,
                 VisualFeatures.OBJECTS,
             ],
@@ -41,20 +40,16 @@ def analyze_image_with_cv(image_url: str):
 
         logging.info("--- 👁️ REZULTATI ANALIZE SLIKE ---")
 
-        # 1. Opis slike (Caption)
-        if result.caption is not None:
-            logging.info(
-                f"📝 Opis: '{result.caption.text}' (Pouzdanost: {result.caption.confidence:.2f})"
-            )
-
-        # 2. Tagovi (Oznake)
+        # 1. Tagovi (Oznake)
         if result.tags is not None:
-            tags = [tag.name for tag in result.tags.values]
+            tags = [tag.name for tag in result.tags.list]
             logging.info(f"🏷️  Tagovi: {', '.join(tags)}")
 
-        # 3. Detektovani objekti
+        # 2. Detektovani objekti
         if result.objects is not None:
-            for obj in result.objects.values:
+            for obj in result.objects.list:
+                if not obj.tags:
+                    continue
                 logging.info(
                     f"📦 Detektovan objekat: {obj.tags[0].name} (Pouzdanost: {obj.tags[0].confidence:.2f})"
                 )
@@ -64,28 +59,19 @@ def analyze_image_with_cv(image_url: str):
 
 
 @app.function_name("analyze-image")
-@app.route(route="analyze-image", methods=["POST"])
-def analyze_image(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info("✅ Azure Function se pokrenut!")
+@app.blob_trigger(arg_name="myblob", path="face-snapshots/{name}", connection="AzureWebJobsStorage")
+def analyze_image(myblob: func.InputStream):
+    logging.info(f"✅ Azure Function (Blob Trigger) se aktivirala za blob: {myblob.name}")
 
     try:
-        events = req.get_json()
-
-        for i, event in enumerate(events):
-            event_type = event.get("eventType")
-
-            if event_type == "Microsoft.Storage.BlobCreated":
-                blob_url = event["data"]["url"]
-                blob_name = blob_url.split("/")[-1]
-
-                logging.info(f"🖼️  Slika uploadovana: {blob_name}")
-                logging.info(f"🔗 URL: {blob_url}")
-
-                # POZIV COMPUTER VISION ANALIZE
-                analyze_image_with_cv(blob_url)
-
-        return func.HttpResponse("OK", status_code=200)
+        # Čitamo sadržaj bloba u bajtove
+        image_data = myblob.read()
+        
+        if image_data:
+            # POZIV COMPUTER VISION ANALIZE
+            analyze_image_with_cv(image_data)
+        else:
+            logging.warning("⚠️ Blob je prazan, preskačem analizu.")
 
     except Exception as e:
         logging.error(f"❌ Greška: {str(e)}")
-        return func.HttpResponse("Greška", status_code=400)

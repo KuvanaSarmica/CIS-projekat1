@@ -1,8 +1,12 @@
 import os
 import cv2
 import datetime as dt
+import logging
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
+from azure.ai.vision.imageanalysis import ImageAnalysisClient
+from azure.ai.vision.imageanalysis.models import VisualFeatures
+from azure.core.credentials import AzureKeyCredential
 
 # Učitavamo .env fajl samo jednom pri pokretanju modula
 load_dotenv()
@@ -10,6 +14,8 @@ load_dotenv()
 connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
 container_name = os.getenv('AZURE_CONTAINER_NAME')
 face_container = os.getenv('AZURE_FACE_CONTAINER_NAME')
+vision_endpoint = os.getenv('AZURE_VISION_ENDPOINT')
+vision_key = os.getenv('AZURE_VISION_KEY')
 
 # Inicijalizujemo Azure Blob klijenta jednom na nivou modula
 blob_service_client = None
@@ -50,8 +56,45 @@ def save_snapshot(frame):
         blob_client.upload_blob(jpg_bytes.tobytes(), overwrite=True)
         print(f"[Blob Storage] Uspešno sačuvan snapshot: {blob_name}")
 
+        # --- DODATO: Poziv Azure Computer Vision analize odmah nakon uploada ---
+        if vision_endpoint and vision_key:
+            analyze_image_with_cv(jpg_bytes.tobytes())
+
     except Exception as ex:
         print(f"[Blob Service Exception]: {ex}")
+
+def analyze_image_with_cv(image_data: bytes):
+    """Šalje bajtove slike Azure Computer Vision servisu na analizu i ispisuje rezultate u konzolu."""
+    try:
+        client = ImageAnalysisClient(
+            endpoint=vision_endpoint, 
+            credential=AzureKeyCredential(vision_key)
+        )
+
+        result = client.analyze(
+            image_data=image_data,
+            visual_features=[
+                VisualFeatures.TAGS,
+                VisualFeatures.OBJECTS,
+            ],
+        )
+
+        print("\n--- 👁️ REZULTATI ANALIZE SLIKE (Computer Vision) ---")
+
+        if result.tags is not None:
+            tags = [tag.name for tag in result.tags.list]
+            print(f"🏷️  Tagovi: {', '.join(tags)}")
+
+        if result.objects is not None:
+            for obj in result.objects.list:
+                if not obj.tags:
+                    continue
+                print(f"📦 Detektovan objekat: {obj.tags[0].name} (Pouzdanost: {obj.tags[0].confidence:.2f})")
+        
+        print("---------------------------------------------------\n")
+
+    except Exception as e:
+        print(f"[Computer Vision Error]: {e}")
 
 def upload_video(file_path):
     """
