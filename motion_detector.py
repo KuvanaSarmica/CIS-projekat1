@@ -11,7 +11,7 @@ from push_notification import send_face_detection_notification
 
 
 from stream_capture import StreamCapture
-from blob_service import save_snapshot
+from blob_service import save_snapshot, process_face_snapshot
 from blob_service import upload_video
 
 
@@ -185,25 +185,19 @@ def detection(cap,snimač):
 
             # Ako je detektovano jedno ili vise lica
             if len(detection_result.detections) > 0:
-
-                # Saljemo event samo ako je proslo vise od 8 sekundi od poslednjeg slanja
-                if poslednje_slanje_lica is None or \
-                        (now - poslednje_slanje_lica).total_seconds() > 5:
-
+                if poslednje_slanje_lica is None or (now - poslednje_slanje_lica).total_seconds() > 5:
                     data = {"vreme": str(now), "kamera": "main"}
 
-                    # Saljemo face_detected event asinhrono
+                    # Asinhrono slanje EventGrid događaja
                     send_event_async("face_detected", data)
-                    send_face_notification_async(data["kamera"], data["vreme"])
 
+                    # Pokretanje u pozadinskoj niti: Upload -> CV Analiza -> Push Notifikacija
                     threading.Thread(
-                        target=save_snapshot,
-                        args=(current_clean_frame,),
+                        target=process_face_snapshot,
+                        args=(current_clean_frame, data["kamera"], data["vreme"]),
                         daemon=True
                     ).start()
 
-
-                    # Pamtimo vreme slanja
                     poslednje_slanje_lica = now
 
                 # Crtamo pravougaonik oko svakog detektovanog lica
