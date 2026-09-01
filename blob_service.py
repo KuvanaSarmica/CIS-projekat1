@@ -4,11 +4,7 @@ import datetime as dt
 import logging
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
-from azure.ai.vision.imageanalysis import ImageAnalysisClient
-from azure.ai.vision.imageanalysis.models import VisualFeatures
-from azure.core.credentials import AzureKeyCredential
 
-from push_notification import send_face_detection_notification
 
 # Učitavamo .env fajl samo jednom pri pokretanju modula
 load_dotenv()
@@ -16,8 +12,7 @@ load_dotenv()
 connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
 container_name = os.getenv('AZURE_CONTAINER_NAME')
 face_container = os.getenv('AZURE_FACE_CONTAINER_NAME')
-vision_endpoint = os.getenv('AZURE_VISION_ENDPOINT')
-vision_key = os.getenv('AZURE_VISION_KEY')
+
 
 # Inicijalizujemo Azure Blob klijenta jednom na nivou modula
 blob_service_client = None
@@ -58,91 +53,13 @@ def save_snapshot(frame):
         blob_client.upload_blob(jpg_bytes.tobytes(), overwrite=True)
         print(f"[Blob Storage] Uspešno sačuvan snapshot: {blob_name}")
 
-        # --- DODATO: Poziv Azure Computer Vision analize odmah nakon uploada ---
-        if vision_endpoint and vision_key:
-            analyze_image_with_cv(jpg_bytes.tobytes())
+
 
     except Exception as ex:
         print(f"[Blob Service Exception]: {ex}")
 
 
-def analyze_image_with_cv(image_data: bytes):
-    """Analizira bajtove slike i vraća listu tagova i detektovanih objekata."""
-    tags = []
-    objects = []
 
-    if not vision_endpoint or not vision_key:
-        return tags, objects
-
-    try:
-        client = ImageAnalysisClient(
-            endpoint=vision_endpoint,
-            credential=AzureKeyCredential(vision_key)
-        )
-
-        result = client.analyze(
-            image_data=image_data,
-            visual_features=[
-                VisualFeatures.TAGS,
-                VisualFeatures.OBJECTS,
-            ],
-        )
-
-        if result.tags is not None:
-            tags = [tag.name for tag in result.tags.list]
-
-        if result.objects is not None:
-            for obj in result.objects.list:
-                if obj.tags:
-                    objects.append(f"{obj.tags[0].name} ({obj.tags[0].confidence:.0%})")
-
-    except Exception as e:
-        print(f"[Computer Vision Error]: {e}")
-
-    return tags, objects
-
-
-def process_face_snapshot(frame, camera="main", timestamp=None):
-    """
-    1. Otprema snapshot na Azure Blob Storage
-    2. Poziva Computer Vision i izdvaja tagove/objekte
-    3. Šalje dekstop push notifikaciju sa rezultatima
-    """
-    if not blob_service_client or not face_container:
-        print("[Blob Service Error] Azure konekcija ili ime kontejnera nisu podešeni.")
-        return
-
-    try:
-        blob_name = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".jpg"
-        _, jpg_bytes = cv2.imencode('.jpg', frame)
-
-        if jpg_bytes is None or len(jpg_bytes) == 0:
-            print("[Blob Service Error] Nije moguće konvertovati frame u JPG")
-            return
-
-        jpg_data = jpg_bytes.tobytes()
-
-        # 1. Upload na Azure Blob Storage
-        blob_client = blob_service_client.get_blob_client(
-            container=face_container,
-            blob=blob_name
-        )
-        blob_client.upload_blob(jpg_data, overwrite=True)
-        print(f"[Blob Storage] Uspešno sačuvan snapshot: {blob_name}")
-
-        # 2. Analiza slike
-        tags, objects = analyze_image_with_cv(jpg_data)
-
-        # 3. Slanje notifikacije sa detaljima
-        send_face_detection_notification(
-            camera=camera,
-            timestamp=timestamp,
-            tags=tags,
-            objects=objects
-        )
-
-    except Exception as ex:
-        print(f"[Process Snapshot Exception]: {ex}")
 
 def upload_video(file_path):
     """

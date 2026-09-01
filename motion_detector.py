@@ -11,7 +11,7 @@ from push_notification import send_face_detection_notification
 
 
 from stream_capture import StreamCapture
-from blob_service import save_snapshot, process_face_snapshot
+from blob_service import save_snapshot
 from blob_service import upload_video
 
 
@@ -31,13 +31,7 @@ def send_event_async(event_type, data):
 
 
 
-def send_face_notification_async(camera, timestamp):
-    thread = threading.Thread(
-        target=send_face_detection_notification,
-        args=(camera, timestamp),
-        daemon=True
-    )
-    thread.start()
+
 
 
 
@@ -191,10 +185,9 @@ def detection(cap,snimač):
                     # Asinhrono slanje EventGrid događaja
                     send_event_async("face_detected", data)
 
-                    # Pokretanje u pozadinskoj niti: Upload -> CV Analiza -> Push Notifikacija
                     threading.Thread(
-                        target=process_face_snapshot,
-                        args=(current_clean_frame, data["kamera"], data["vreme"]),
+                        target=save_snapshot,
+                        args=(current_clean_frame,),
                         daemon=True
                     ).start()
 
